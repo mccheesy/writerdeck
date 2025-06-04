@@ -1,30 +1,58 @@
-# Allow build scripts to be referenced without being copied into the final image
-FROM scratch AS ctx
-COPY build_files /
+FROM ghcr.io/ublue-os/ucore:latest
 
-# Base Image
-FROM ghcr.io/ublue-os/bazzite:stable
+# Define the RPM packages to layer directly into the immutable base system.
+# These are essential for your writerdeck's core functionality and minimal graphical environment.
+RUN rpm-ostree install \
+    cage \
+    ptyxis \
+    neovim \
+    zsh \
+    git \
+    rsync \
+    openssh-clients \
+    rclone \
+    xorg-x11-server-Xwayland \
+    mesa-libGL \
+    mesa-dri-drivers \
+    xorg-x11-drv-intel \
+    NetworkManager \
+    NetworkManager-wifi \
+    wpa_supplicant \
+    google-noto-sans-mono-fonts && \
+    rpm-ostree cleanup -m
 
-## Other possible base images include:
-# FROM ghcr.io/ublue-os/bazzite:latest
-# FROM ghcr.io/ublue-os/bluefin-nvidia:stable
-# 
-# ... and so on, here are more base images
-# Universal Blue Images: https://github.com/orgs/ublue-os/packages
-# Fedora base image: quay.io/fedora/fedora-bootc:41
-# CentOS base images: quay.io/centos-bootc/centos-bootc:stream10
+# Create a dedicated 'writer' user for the appliance.
+# This user will be automatically logged in to the writerdeck session.
+# IMPORTANT: Replace 'your_secure_password' with a strong, unique password.
+# For a truly secure appliance, consider relying solely on SSH keys for management
+# and remove the password setting here (or set an extremely complex one).
+RUN useradd -m -s /usr/bin/zsh writer && \
+    echo "writer:password" | chpasswd && \
+    # Set zsh as the default shell for the root user as well, for consistency
+    # if you ever need to access the root shell (e.g., via `podman exec`).
+    chsh -s /usr/bin/zsh root
 
-### MODIFICATIONS
-## make modifications desired in your image and install packages by modifying the build.sh script
-## the following RUN directive does all the things required to run "build.sh" as recommended.
+# Copy custom configuration files from your 'config' directory into the image.
+# These files define the systemd service for auto-boot and default user dotfiles.
+COPY config/etc/systemd/system/writerdeck.service /etc/systemd/system/writerdeck.service
+COPY config/etc/skel/.zshrc /etc/skel/.zshrc
+COPY config/etc/skel/.config/nvim/init.lua /etc/skel/.config/nvim/init.lua
 
-RUN --mount=type=bind,from=ctx,source=/,target=/ctx \
-    --mount=type=cache,dst=/var/cache \
-    --mount=type=cache,dst=/var/log \
-    --mount=type=tmpfs,dst=/tmp \
-    /ctx/build.sh && \
-    ostree container commit
-    
-### LINTING
-## Verify final image and contents are correct.
-RUN bootc container lint
+# Enable the custom systemd service and set it as the default boot target.
+# This ensures the system boots directly into your writerdeck environment.
+RUN systemctl enable writerdeck.service
+
+# Create a symlink to make writerdeck.service the default boot target.
+# This replaces `systemctl set-default` which cannot be run during build.
+RUN ln -sf /etc/systemd/system/writerdeck.service /etc/systemd/system/default.target
+
+# Set the default shell for interactive sessions within the container (e.g., `podman exec`).
+SHELL ["/usr/bin/zsh", "-c"]
+
+# Set the default working directory for the container.
+WORKDIR /home/writer
+
+# Define the entrypoint for the image. When this image is run as a system,
+# systemd will be the initial process (PID 1).
+CMD ["/usr/sbin/init"]
+

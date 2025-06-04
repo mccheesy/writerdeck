@@ -1,0 +1,37 @@
+# Place this file at: config/etc/systemd/system/writerdeck.service
+
+[Unit]
+Description=Writerdeck Neovim Session (Kiosk Mode)
+# Ensure this service starts after user sessions are ready and network is online.
+After=systemd-user-sessions.service network-online.target
+# This service "wants" the network to be online, but won't fail if it's not (due to Wants=).
+Wants=network-online.target
+
+[Service]
+# Run the service as the 'writer' user.
+User=writer
+Group=writer
+# Use PAM for authentication (standard login process).
+PAMName=login
+# Run the graphical session on TTY1 (the first virtual console).
+TTY=1
+# This is the core command that launches your writerdeck.
+# It tells 'cage' (the Wayland kiosk compositor) to launch '/usr/bin/ptyxis'
+# The '--' separates 'cage' arguments from the application it should launch.
+# The '-e /usr/bin/nvim' tells Ptyxis to immediately execute Neovim.
+# You can add '--debug' to 'cage' for initial troubleshooting, then remove it.
+ExecStart=/usr/bin/cage -- /usr/bin/ptyxis -e /usr/bin/nvim
+# Ensure standard input/output/error are connected to the TTY for interaction.
+StandardInput=tty
+StandardOutput=inherit
+StandardError=inherit
+# Optionally, configure the service to restart if it crashes, enhancing robustness.
+# Restart=always
+# RestartSec=5s
+
+[Install]
+# This service should be started when the graphical target is reached.
+# By setting it as the default target in the Containerfile, it effectively
+# becomes the primary boot target for the system.
+WantedBy=graphical.target
+
